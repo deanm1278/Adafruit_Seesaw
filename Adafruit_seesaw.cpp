@@ -27,6 +27,8 @@
 
 #include "Adafruit_seesaw.h"
 
+static const SPISettings seesawSettings(4000000, MSB_FIRST, SPI_MODE0);
+
 /**
  *****************************************************************************************
  *  @brief      Start the seesaw
@@ -40,7 +42,7 @@
 bool Adafruit_seesaw::begin(uint8_t addr)
 {
 	_i2caddr = addr;
-	
+	_cs = -1;
 	_i2c_init();
 
 	SWReset();
@@ -51,6 +53,16 @@ bool Adafruit_seesaw::begin(uint8_t addr)
 	if(c != SEESAW_HW_ID_CODE) return false;
 	
 	return true;
+}
+
+bool Adafruit_seesaw::begin(uint8_t pin, SPIClass *spi)
+{
+    _cs = pin;
+    _spi = spi;
+    pinMode(_cs, OUTPUT);
+    digitalWrite(_cs, HIGH);
+
+    _spi->begin();
 }
 
 /**
@@ -524,28 +536,48 @@ void Adafruit_seesaw::_i2c_init()
  ****************************************************************************************/
 void Adafruit_seesaw::read(uint8_t regHigh, uint8_t regLow, uint8_t *buf, uint8_t num, uint16_t delay)
 {
-	uint8_t value;
-	uint8_t pos = 0;
-	
-	//on arduino we need to read in 32 byte chunks
-	while(pos < num){
-		
-		uint8_t read_now = min(32, num - pos);
-		Wire.beginTransmission((uint8_t)_i2caddr);
-		Wire.write((uint8_t)regHigh);
-		Wire.write((uint8_t)regLow);
-		Wire.endTransmission();
+    if(_cs > -1){
+        digitalWrite(_cs, LOW);
+        _spi->beginTransaction(seesawSettings);
 
-		//TODO: tune this
-		delayMicroseconds(delay);
+        _spi->transfer(regHigh);
+        _spi->transfer(regLow);
 
-		Wire.requestFrom((uint8_t)_i2caddr, read_now);
-		
-		for(int i=0; i<read_now; i++){
-			buf[pos] = Wire.read();
-			pos++;
-		}
-	}
+        digitalWrite(_cs, HIGH);
+
+        delayMicroseconds(delay);
+
+        digitalWrite(_cs, LOW);
+
+        _spi->transfer(buf, num);
+
+        _spi->endTransaction();
+        digitalWrite(_cs, HIGH);
+    }
+    else{
+        uint8_t value;
+        uint8_t pos = 0;
+
+        //on arduino we need to read in 32 byte chunks
+        while(pos < num){
+
+            uint8_t read_now = min(32, num - pos);
+            Wire.beginTransmission((uint8_t)_i2caddr);
+            Wire.write((uint8_t)regHigh);
+            Wire.write((uint8_t)regLow);
+            Wire.endTransmission();
+
+            //TODO: tune this
+            delayMicroseconds(delay);
+
+            Wire.requestFrom((uint8_t)_i2caddr, read_now);
+
+            for(int i=0; i<read_now; i++){
+                buf[pos] = Wire.read();
+                pos++;
+            }
+        }
+    }
 }
 
 /**
@@ -561,11 +593,24 @@ void Adafruit_seesaw::read(uint8_t regHigh, uint8_t regLow, uint8_t *buf, uint8_
  ****************************************************************************************/
 void Adafruit_seesaw::write(uint8_t regHigh, uint8_t regLow, uint8_t *buf, uint8_t num)
 { 
-	Wire.beginTransmission((uint8_t)_i2caddr);
-	Wire.write((uint8_t)regHigh);
-	Wire.write((uint8_t)regLow);
-	Wire.write((uint8_t *)buf, num);
-	Wire.endTransmission();
+    if(_cs > -1){
+        digitalWrite(_cs, LOW);
+        _spi->beginTransaction(seesawSettings);
+
+        _spi->transfer(regHigh);
+        _spi->transfer(regLow);
+        _spi->transfer(buf, num);
+
+        _spi->endTransaction();
+        digitalWrite(_cs, HIGH);
+    }
+    else{
+        Wire.beginTransmission((uint8_t)_i2caddr);
+        Wire.write((uint8_t)regHigh);
+        Wire.write((uint8_t)regLow);
+        Wire.write((uint8_t *)buf, num);
+        Wire.endTransmission();
+    }
 }
 
 /**
@@ -622,8 +667,20 @@ size_t Adafruit_seesaw::write(const char *str) {
  ****************************************************************************************/
 void Adafruit_seesaw::writeEmpty(uint8_t regHigh, uint8_t regLow)
 {
-    Wire.beginTransmission((uint8_t)_i2caddr);
-    Wire.write((uint8_t)regHigh);
-    Wire.write((uint8_t)regLow);
-    Wire.endTransmission();
+    if(_cs > -1){
+        digitalWrite(_cs, LOW);
+        _spi->beginTransaction(seesawSettings);
+
+        _spi->transfer(regHigh);
+        _spi->transfer(regLow);
+
+        _spi->endTransaction();
+        digitalWrite(_cs, HIGH);
+    }
+    else{
+        Wire.beginTransmission((uint8_t)_i2caddr);
+        Wire.write((uint8_t)regHigh);
+        Wire.write((uint8_t)regLow);
+        Wire.endTransmission();
+    }
 }

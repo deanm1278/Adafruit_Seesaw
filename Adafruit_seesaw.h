@@ -27,6 +27,7 @@
 #endif
 
 #include <Wire.h>
+#include <SPI.h>
 
 /*=========================================================================
     I2C ADDRESS/BITS
@@ -137,6 +138,7 @@ class Adafruit_seesaw : public Print {
 		~Adafruit_seesaw(void) {};
 		
 		bool begin(uint8_t addr = SEESAW_ADDRESS);
+		bool begin(uint8_t pin, SPIClass *spi);
         uint32_t getOptions();
         uint32_t getVersion();
 		void SWReset();
@@ -175,6 +177,8 @@ class Adafruit_seesaw : public Print {
         virtual size_t write(const char *str);
 
 	protected:
+        int8_t _cs;
+        SPIClass *_spi;
 		uint8_t _i2caddr; /*!< The I2C address used to communicate with the seesaw */
 
 		void      write8(byte regHigh, byte regLow, byte value);
