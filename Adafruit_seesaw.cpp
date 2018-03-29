@@ -29,6 +29,10 @@
 
 static const SPISettings seesawSettings(4000000, MSB_FIRST, SPI_MODE0);
 
+#define BFIN_DELAY for(int __dl=0; __dl<650000; __dl++) __asm__ volatile("NOP;");
+#define BFIN_DELAY_MED for(int __dl=0; __dl<5000; __dl++) __asm__ volatile("NOP;");
+#define BFIN_DELAY_SHORT for(int __dl=0; __dl<1000; __dl++) __asm__ volatile("NOP;");
+
 /**
  *****************************************************************************************
  *  @brief      Start the seesaw
@@ -59,10 +63,22 @@ bool Adafruit_seesaw::begin(uint8_t pin, SPIClass *spi)
 {
     _cs = pin;
     _spi = spi;
-    pinMode(_cs, OUTPUT);
-    digitalWrite(_cs, HIGH);
+    ::pinMode(_cs, OUTPUT);
+    ::digitalWrite(_cs, HIGH);
 
     _spi->begin();
+
+#if 1
+    SWReset();
+    delay(500);
+#endif
+
+    uint8_t c = this->read8(SEESAW_STATUS_BASE, SEESAW_STATUS_HW_ID);
+
+    if(c != SEESAW_HW_ID_CODE)
+        return false;
+
+    return true;
 }
 
 /**
@@ -537,22 +553,32 @@ void Adafruit_seesaw::_i2c_init()
 void Adafruit_seesaw::read(uint8_t regHigh, uint8_t regLow, uint8_t *buf, uint8_t num, uint16_t delay)
 {
     if(_cs > -1){
-        digitalWrite(_cs, LOW);
+        ::digitalWrite(_cs, LOW);
         _spi->beginTransaction(seesawSettings);
 
         _spi->transfer(regHigh);
+        BFIN_DELAY_SHORT
         _spi->transfer(regLow);
+        BFIN_DELAY_SHORT
 
-        digitalWrite(_cs, HIGH);
+        ::digitalWrite(_cs, HIGH);
 
-        delayMicroseconds(delay);
+        BFIN_DELAY
 
-        digitalWrite(_cs, LOW);
+        ::digitalWrite(_cs, LOW);
 
-        _spi->transfer(buf, num);
+        _spi->transfer(0x00);
+        BFIN_DELAY_MED
+        _spi->transfer(0x00);
+        BFIN_DELAY_SHORT
+        for(int i=0; i<num; i++){
+            uint8_t c = _spi->transfer(0x00);
+            *buf++ = c;
+            BFIN_DELAY_SHORT
+        }
 
         _spi->endTransaction();
-        digitalWrite(_cs, HIGH);
+        ::digitalWrite(_cs, HIGH);
     }
     else{
         uint8_t value;
@@ -594,15 +620,18 @@ void Adafruit_seesaw::read(uint8_t regHigh, uint8_t regLow, uint8_t *buf, uint8_
 void Adafruit_seesaw::write(uint8_t regHigh, uint8_t regLow, uint8_t *buf, uint8_t num)
 { 
     if(_cs > -1){
-        digitalWrite(_cs, LOW);
+        ::digitalWrite(_cs, LOW);
         _spi->beginTransaction(seesawSettings);
 
         _spi->transfer(regHigh);
+        BFIN_DELAY_SHORT
         _spi->transfer(regLow);
+        BFIN_DELAY_SHORT
         _spi->transfer(buf, num);
+        BFIN_DELAY_SHORT
 
         _spi->endTransaction();
-        digitalWrite(_cs, HIGH);
+        ::digitalWrite(_cs, HIGH);
     }
     else{
         Wire.beginTransmission((uint8_t)_i2caddr);
@@ -668,14 +697,16 @@ size_t Adafruit_seesaw::write(const char *str) {
 void Adafruit_seesaw::writeEmpty(uint8_t regHigh, uint8_t regLow)
 {
     if(_cs > -1){
-        digitalWrite(_cs, LOW);
+        ::digitalWrite(_cs, LOW);
         _spi->beginTransaction(seesawSettings);
 
         _spi->transfer(regHigh);
+        BFIN_DELAY_SHORT
         _spi->transfer(regLow);
+        BFIN_DELAY_SHORT
 
         _spi->endTransaction();
-        digitalWrite(_cs, HIGH);
+        ::digitalWrite(_cs, HIGH);
     }
     else{
         Wire.beginTransmission((uint8_t)_i2caddr);
