@@ -156,6 +156,7 @@ class Adafruit_seesaw : public Print {
 
         uint16_t analogRead(uint8_t pin);
         void analogReadBulk(uint16_t *buf, uint8_t num);
+        void analogRead(uint8_t pin, void (*cb)(uint16_t));
 
         void setPWMFreq(uint8_t pin, uint16_t freq);
 
@@ -185,6 +186,7 @@ class Adafruit_seesaw : public Print {
         uint8_t   read8(byte regHigh, byte regLow);
 		
 		void read(uint8_t regHigh, uint8_t regLow, uint8_t *buf, uint8_t num, uint16_t delay = 125);
+		void readAsync(uint8_t regHigh, uint8_t regLow, uint8_t num);
 		void write(uint8_t regHigh, uint8_t regLow, uint8_t *buf, uint8_t num);
     void writeEmpty(uint8_t regHigh, uint8_t regLow);
 		void _i2c_init();

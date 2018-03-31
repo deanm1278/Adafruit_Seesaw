@@ -27,11 +27,50 @@
 
 #include "Adafruit_seesaw.h"
 
-static const SPISettings seesawSettings(4000000, MSB_FIRST, SPI_MODE0);
+static const SPISettings seesawSettings(2000000, MSB_FIRST, SPI_MODE0);
 
 #define BFIN_DELAY for(int __dl=0; __dl<650000; __dl++) __asm__ volatile("NOP;");
 #define BFIN_DELAY_MED for(int __dl=0; __dl<5000; __dl++) __asm__ volatile("NOP;");
 #define BFIN_DELAY_SHORT for(int __dl=0; __dl<1000; __dl++) __asm__ volatile("NOP;");
+
+static void (*_cb_uint16_t)(uint16_t) = NULL;
+static volatile uint8_t _spi_buf[64];
+static volatile uint8_t *_spi_buf_ptr;
+static volatile uint8_t _read_count;
+
+extern "C" {
+//TODO: this is bad cause you can't use any other interrupts. fix later
+int PINT0_BLOCK_Handler (int IQR_NUMBER )
+	{
+		digitalWrite(PIN_SAMD_SS, LOW);
+		SPI.beginTransaction(seesawSettings);
+
+		SPI.transfer(0x00);
+		BFIN_DELAY_SHORT
+		SPI.transfer(0x00);
+		BFIN_DELAY_SHORT
+		for(int i=0; i<_read_count; i++){
+			uint8_t c = SPI.transfer(0x00);
+			*_spi_buf_ptr++ = c;
+			BFIN_DELAY_SHORT
+		}
+
+		SPI.endTransaction();
+		digitalWrite(PIN_SAMD_SS, HIGH);
+
+		disableIRQ(20);
+		clearInterrupt(PIN_SAMD_DRDY);
+
+		//call the callback
+		if(_cb_uint16_t != NULL){
+			uint16_t ret = ((uint16_t)_spi_buf[0] << 8) | _spi_buf[1];
+			_cb_uint16_t(ret);
+			_cb_uint16_t = NULL;
+		}
+
+		return IQR_NUMBER;
+	}
+};
 
 /**
  *****************************************************************************************
@@ -72,6 +111,10 @@ bool Adafruit_seesaw::begin(uint8_t pin, SPIClass *spi)
     SWReset();
     delay(500);
 #endif
+    //set interrupt
+    disableIRQ(20);
+    ::pinMode(PIN_SAMD_DRDY, INTERRUPT_RISING);
+	setIRQPriority(20, IRQ_MAX_PRIORITY >> 1);
 
     uint8_t c = this->read8(SEESAW_STATUS_BASE, SEESAW_STATUS_HW_ID);
 
@@ -231,6 +274,25 @@ uint16_t Adafruit_seesaw::analogRead(uint8_t pin)
 	uint16_t ret = ((uint16_t)buf[0] << 8) | buf[1];
   	delay(1);
 	return ret;
+}
+
+void Adafruit_seesaw::analogRead(uint8_t pin, void (*cb)(uint16_t))
+{
+	uint8_t p;
+	switch(pin){
+		case ADC_INPUT_0_PIN: p = 0; break;
+		case ADC_INPUT_1_PIN: p = 1; break;
+		case ADC_INPUT_2_PIN: p = 2; break;
+		case ADC_INPUT_3_PIN: p = 3; break;
+		default:
+			return;
+			break;
+	}
+
+	//if(_cb_uint16_t == NULL){
+		_cb_uint16_t = cb;
+		this->readAsync(SEESAW_ADC_BASE, SEESAW_ADC_CHANNEL_OFFSET + p, 2);
+	//}
 }
 
 //TODO: not sure if this is how this is gonna work yet
@@ -606,6 +668,29 @@ void Adafruit_seesaw::read(uint8_t regHigh, uint8_t regLow, uint8_t *buf, uint8_
     }
 }
 
+void Adafruit_seesaw::readAsync(uint8_t regHigh, uint8_t regLow, uint8_t num)
+{
+	::digitalWrite(_cs, LOW);
+	_spi->beginTransaction(seesawSettings);
+
+	_spi->transfer(regHigh);
+	BFIN_DELAY_SHORT
+	_spi->transfer(regLow);
+	BFIN_DELAY_SHORT
+
+	_spi->endTransaction();
+	::digitalWrite(_cs, HIGH);
+
+	_spi_buf_ptr = _spi_buf;
+
+	//set the bytecount
+	_read_count = num;
+
+    //enable pint0
+	clearInterrupt(PIN_SAMD_DRDY);
+	enableIRQ(20);
+}
+
 /**
  *****************************************************************************************
  *  @brief      Write a specified number of bytes to the seesaw from the passed buffer.
@@ -622,6 +707,7 @@ void Adafruit_seesaw::write(uint8_t regHigh, uint8_t regLow, uint8_t *buf, uint8
     if(_cs > -1){
         ::digitalWrite(_cs, LOW);
         _spi->beginTransaction(seesawSettings);
+        BFIN_DELAY_SHORT
 
         _spi->transfer(regHigh);
         BFIN_DELAY_SHORT
