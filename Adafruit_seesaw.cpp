@@ -27,17 +27,29 @@
 
 #include "Adafruit_seesaw.h"
 
+#ifdef __BF70x__
 static const SPISettings seesawSettings(2000000, MSB_FIRST, SPI_MODE0);
+#else
+static const SPISettings seesawSettings(4000000, MSBFIRST, SPI_MODE0);
+#endif
 
+
+#ifdef __BF70x__
 #define BFIN_DELAY for(int __dl=0; __dl<650000; __dl++) __asm__ volatile("NOP;");
 #define BFIN_DELAY_MED for(int __dl=0; __dl<5000; __dl++) __asm__ volatile("NOP;");
 #define BFIN_DELAY_SHORT for(int __dl=0; __dl<1000; __dl++) __asm__ volatile("NOP;");
+#else
+#define BFIN_DELAY delayMicroseconds(100);
+#define BFIN_DELAY_MED delayMicroseconds(100);
+#define BFIN_DELAY_SHORT delayMicroseconds(100);
+#endif
 
 static void (*_cb_uint16_t)(uint16_t) = NULL;
 static volatile uint8_t _spi_buf[64];
 static volatile uint8_t *_spi_buf_ptr;
 static volatile uint8_t _read_count;
 
+#ifdef __BF70x__
 extern "C" {
 //TODO: this is bad cause you can't use any other interrupts. fix later
 int PINT0_BLOCK_Handler (int IQR_NUMBER )
@@ -71,6 +83,7 @@ int PINT0_BLOCK_Handler (int IQR_NUMBER )
 		return IQR_NUMBER;
 	}
 };
+#endif
 
 /**
  *****************************************************************************************
@@ -107,14 +120,15 @@ bool Adafruit_seesaw::begin(uint8_t pin, SPIClass *spi)
 
     _spi->begin();
 
-#if 1
     SWReset();
     delay(500);
-#endif
+
+#ifdef __BF70x__
     //set interrupt
     disableIRQ(20);
     ::pinMode(PIN_SAMD_DRDY, INTERRUPT_RISING);
 	setIRQPriority(20, IRQ_MAX_PRIORITY >> 1);
+#endif
 
     uint8_t c = this->read8(SEESAW_STATUS_BASE, SEESAW_STATUS_HW_ID);
 
@@ -180,7 +194,11 @@ uint32_t Adafruit_seesaw::getVersion()
  ****************************************************************************************/
 void Adafruit_seesaw::pinMode(uint8_t pin, uint8_t mode)
 {
-	pinModeBulk(1ul << pin, mode);
+	if(pin >= 32)
+		pinModeBulk(0, 1ul << (pin - 32), mode);
+	
+	else
+		pinModeBulk(1ul << pin, mode);
 }
 
 /**
@@ -194,7 +212,11 @@ void Adafruit_seesaw::pinMode(uint8_t pin, uint8_t mode)
  ****************************************************************************************/
 void Adafruit_seesaw::digitalWrite(uint8_t pin, uint8_t value)
 {
-	digitalWriteBulk(1ul << pin, value);
+	if(pin >= 32)
+		digitalWriteBulk(1ul << pin, value);
+		
+	else
+		digitalWriteBulk(0, 1ul << pin, value);
 }
 
 
@@ -334,6 +356,25 @@ void Adafruit_seesaw::pinModeBulk(uint32_t pins, uint8_t mode)
 		
 }
 
+void Adafruit_seesaw::pinModeBulk(uint32_t pinsa, uint32_t pinsb, uint8_t mode)
+{
+	uint8_t cmd[] = { (uint8_t)(pinsa >> 24) , (uint8_t)(pinsa >> 16), (uint8_t)(pinsa >> 8), (uint8_t)pinsa,
+				(uint8_t)(pinsb >> 24) , (uint8_t)(pinsb >> 16), (uint8_t)(pinsb >> 8), (uint8_t)pinsb };
+	switch (mode){
+		case OUTPUT:
+			this->write(SEESAW_GPIO_BASE, SEESAW_GPIO_DIRSET_BULK, cmd, 8);
+			break;
+		case INPUT:
+			this->write(SEESAW_GPIO_BASE, SEESAW_GPIO_DIRCLR_BULK, cmd, 8);
+			break;
+		case INPUT_PULLUP:
+			this->write(SEESAW_GPIO_BASE, SEESAW_GPIO_DIRCLR_BULK, cmd, 8);
+			this->write(SEESAW_GPIO_BASE, SEESAW_GPIO_PULLENSET, cmd, 8);
+			this->write(SEESAW_GPIO_BASE, SEESAW_GPIO_BULK_SET, cmd, 8);
+			break;
+	}
+}
+
 /**
  *****************************************************************************************
  *  @brief      write a value to multiple GPIO pins at once.
@@ -351,6 +392,16 @@ void Adafruit_seesaw::digitalWriteBulk(uint32_t pins, uint8_t value)
 		this->write(SEESAW_GPIO_BASE, SEESAW_GPIO_BULK_SET, cmd, 4);
 	else
 		this->write(SEESAW_GPIO_BASE, SEESAW_GPIO_BULK_CLR, cmd, 4);
+}
+
+void Adafruit_seesaw::digitalWriteBulk(uint32_t pinsa, uint32_t pinsb, uint8_t value)
+{
+	uint8_t cmd[] = { (uint8_t)(pinsa >> 24) , (uint8_t)(pinsa >> 16), (uint8_t)(pinsa >> 8), (uint8_t)pinsa,
+				(uint8_t)(pinsb >> 24) , (uint8_t)(pinsb >> 16), (uint8_t)(pinsb >> 8), (uint8_t)pinsb };
+	if(value)
+		this->write(SEESAW_GPIO_BASE, SEESAW_GPIO_BULK_SET, cmd, 8);
+	else
+		this->write(SEESAW_GPIO_BASE, SEESAW_GPIO_BULK_CLR, cmd, 8);
 }
 
 /**
@@ -633,10 +684,11 @@ void Adafruit_seesaw::read(uint8_t regHigh, uint8_t regLow, uint8_t *buf, uint8_
         BFIN_DELAY_MED
         _spi->transfer(0x00);
         BFIN_DELAY_SHORT
+
         for(int i=0; i<num; i++){
             uint8_t c = _spi->transfer(0x00);
             *buf++ = c;
-            BFIN_DELAY_SHORT
+    		BFIN_DELAY_SHORT
         }
 
         _spi->endTransaction();
@@ -674,9 +726,9 @@ void Adafruit_seesaw::readAsync(uint8_t regHigh, uint8_t regLow, uint8_t num)
 	_spi->beginTransaction(seesawSettings);
 
 	_spi->transfer(regHigh);
-	BFIN_DELAY_SHORT
+    BFIN_DELAY_SHORT
 	_spi->transfer(regLow);
-	BFIN_DELAY_SHORT
+    BFIN_DELAY_SHORT
 
 	_spi->endTransaction();
 	::digitalWrite(_cs, HIGH);
@@ -686,9 +738,11 @@ void Adafruit_seesaw::readAsync(uint8_t regHigh, uint8_t regLow, uint8_t num)
 	//set the bytecount
 	_read_count = num;
 
+#ifdef __BF70x__
     //enable pint0
 	clearInterrupt(PIN_SAMD_DRDY);
 	enableIRQ(20);
+#endif
 }
 
 /**
